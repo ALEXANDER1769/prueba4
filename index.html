@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Dashboard Ganadero</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin:16px; background:#f5f7fb; color:#1f2937; }
+    .container { max-width:1100px; margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    h1 { margin:0; font-size:20px; }
+    .cards { display:flex; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
+    .card { background:#fff; padding:12px 16px; border-radius:10px; box-shadow:0 4px 12px rgba(10,10,10,0.05); min-width:180px; flex:1; }
+    .charts { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+    canvas { background:#fff; border-radius:8px; padding:10px; box-shadow:0 3px 8px rgba(10,10,10,0.04); }
+    .controls { margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    footer { margin-top:18px; font-size:12px; color:#666; }
+    pre { max-height:160px; overflow:auto; background:#111; color:#eee; padding:8px; border-radius:8px; }
+    #loginScreen { max-width:400px; margin:80px auto; padding:20px; background:#fff; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1); }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- PANTALLA DE LOGIN -->
+<div id="loginScreen">
+  <h2>🔐 Acceso al Dashboard</h2>
+  <p>Ingresa tu correo registrado:</p>
+  <input id="inputEmail" type="email" placeholder="tu@correo.com" style="width:100%; padding:10px; margin:10px 0;" required />
+  <button onclick="login()" style="width:100%; padding:10px; background:#2563eb; color:white; border:none; border-radius:6px;">Acceder</button>
+  <p id="loginMsg" style="color:red; min-height:20px; margin-top:8px;"></p>
+</div>
+
+<!-- DASHBOARD (oculto al inicio) -->
+<div id="dashboard" style="display:none;">
+  <div class="container">
+    <header>
+      <h1>Dashboard Ganadero</h1>
+      <button id="btnLogout" style="padding:6px 12px;">Salir</button>
+    </header>
+
+    <div class="cards" id="resumen">
+      <div class="card"><strong>Total animales</strong><div id="totalAnimales">—</div></div>
+      <div class="card"><strong>Lotes</strong><div id="numLotes">—</div></div>
+      <div class="card"><strong>Tipos</strong><div id="numTipos">—</div></div>
+      <div class="card"><strong>Movimientos</strong><div id="numMovimientos">—</div></div>
+    </div>
+
+    <div class="charts">
+      <div><canvas id="graficoTipos" height="300"></canvas></div>
+      <div><canvas id="graficoLotes" height="300"></canvas></div>
+      <div><canvas id="graficoHistorico" height="260"></canvas></div>
+      <div><canvas id="graficoPesos" height="260"></canvas></div>
+    </div>
+
+    <section style="margin-top:18px">
+      <h3>Movimientos — conteo por motivo</h3>
+      <pre id="movimientosJson">Cargando...</pre>
+    </section>
+
+    <footer>Dashboard Ganadero — Datos actualizados en tiempo real</footer>
+  </div>
+</div>
+
+<script>
+// 🔑 REEMPLAZA ESTA URL CON LA DE TU WEB APP
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYBk6yBlVEMIYlE0g5070PXhdK7__4vwqwZTd09I3qh1OZuWEExX68RY98cZY8QebIeA/exec";
+
+let currentUserEmail = null;
+let chartTipos, chartLotes, chartHistorico, chartPesos;
+
+// === LOGIN ===
+async function login() {
+  const email = document.getElementById('inputEmail').value.trim();
+  const msgEl = document.getElementById('loginMsg');
+  msgEl.textContent = "";
+
+  if (!email || !email.includes('@')) {
+    msgEl.textContent = "Por favor, ingresa un correo válido.";
+    return;
+  }
+
+  msgEl.textContent = "Verificando...";
+  try {
+    const res = await fetch(`${WEBAPP_URL}?action=auth&email=${encodeURIComponent(email)}`);
+    const data = await res.json();
+    if (data.autorizado) {
+      currentUserEmail = email;
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      loadAll(); // ✅ ahora SÍ está definida
+    } else {
+      msgEl.textContent = data.error || "Acceso denegado. ¿Está registrado?";
+    }
+  } catch (err) {
+    console.error(err);
+    msgEl.textContent = "Error de conexión. Verifique su red.";
+  }
+}
+
+// === CARGAR TODOS LOS DATOS ===
+async function loadAll() {
+  if (!currentUserEmail) return;
+
+  const updateEl = (id, text) => { document.getElementById(id).textContent = text; };
+
+  try {
+    // Tipos
+    const tipos = await fetchFromBackend('tipos');
+    drawTipos(tipos);
+    updateEl('numTipos', tipos.length);
+
+    // Lotes
+    const lotes = await fetchFromBackend('lotes');
+    drawLotes(lotes);
+    updateEl('numLotes', lotes.length);
+
+    // Inventario
+    const inventario = await fetchFromBackend('inventario');
+    updateEl('totalAnimales', inventario.total || '0');
+
+    // Movimientos
+    const movs = await fetchFromBackend('movimientos');
+    updateEl('numMovimientos', movs.total || '0');
+    document.getElementById('movimientosJson').textContent = 
+      JSON.stringify(movs.conteoPorMotivo || [], null, 2);
+
+    // Histórico
+    const historico = await fetchFromBackend('historico');
+    drawHistorico(historico);
+
+    // Pesos
+    const pesos = await fetchFromBackend('pesos');
+    drawPesos(pesos);
+
+  } catch (err) {
+    console.error("Error en loadAll:", err);
+    alert("No se pudieron cargar los datos: " + (err.message || err));
+  }
+}
+
+// === LLAMADA AL BACKEND ===
+async function fetchFromBackend(action) {
+  const url = `${WEBAPP_URL}?action=${action}&email=${encodeURIComponent(currentUserEmail)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return await res.json();
+}
+
+// === GRÁFICOS ===
+function drawTipos(data) {
+  const ctx = document.getElementById('graficoTipos').getContext('2d');
+  const labels = (data || []).map(d => d.tipo);
+  const values = (data || []).map(d => d.cantidad);
+  if (chartTipos) chartTipos.destroy();
+  chartTipos = new Chart(ctx, {
+    type: 'pie',
+     { labels, datasets: [{  values, backgroundColor: Chart.defaults.color }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+function drawLotes(data) {
+  const ctx = document.getElementById('graficoLotes').getContext('2d');
+  const labels = (data || []).map(d => d.lote);
+  const values = (data || []).map(d => d.cantidad);
+  if (chartLotes) chartLotes.destroy();
+  chartLotes = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Cantidad',  values }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+function drawHistorico(data) {
+  const ctx = document.getElementById('graficoHistorico').getContext('2d');
+  const labels = (data || []).map(r => {
+    const d = new Date(r.fecha);
+    return isNaN(d) ? r.fecha : d.toLocaleDateString();
+  });
+  const values = (data || []).map(r => Number(r.total || 0));
+  if (chartHistorico) chartHistorico.destroy();
+  chartHistorico = new Chart(ctx, {
+    type: 'line',
+     { labels, datasets: [{ label: 'Total',  values, tension: 0.3 }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+function drawPesos(data) {
+  // Agrupar por lote y promediar
+  const groups = {};
+  (data || []).forEach(r => {
+    const lote = r.lote || 'SIN LOTE';
+    if (!groups[lote]) groups[lote] = { sum: 0, count: 0 };
+    groups[lote].sum += r.peso;
+    groups[lote].count++;
+  });
+  const labels = Object.keys(groups);
+  const values = labels.map(l => groups[l].sum / groups[l].count);
+  
+  const ctx = document.getElementById('graficoPesos').getContext('2d');
+  if (chartPesos) chartPesos.destroy();
+  chartPesos = new Chart(ctx, {
+    type: 'bar',
+     { labels, datasets: [{ label: 'Peso promedio',  values }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+// === LOGOUT ===
+document.getElementById('btnLogout').onclick = () => {
+  currentUserEmail = null;
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'block';
+  document.getElementById('inputEmail').value = '';
+};
+
+</script>
+</body>
+</html>
