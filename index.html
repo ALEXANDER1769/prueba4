@@ -86,10 +86,7 @@
 <div id="login">
   <h2>🔐 Dashboard Ganadero</h2>
   <p>Ingresa tu correo registrado:</p>
-
-  <!-- ✔️ CORREGIDO AQUÍ -->
   <input type="email" id="email" placeholder="tu@correo.com" autocomplete="off" />
-
   <button id="btnLogin">Acceder</button>
   <p id="msg" style="color:#d32f2f; min-height:1.2em;"></p>
 </div>
@@ -114,7 +111,7 @@
   </div>
 
   <h3>Movimientos recientes</h3>
-  <pre id="movData">Cargando...</pre>
+  <pre id="movData">—</pre>
 </div>
 
 <script>
@@ -163,6 +160,7 @@ document.getElementById('btnLogin').addEventListener('click', () => {
       msg.textContent = "Acceso denegado";
     } else {
       currentEmail = email;
+      msg.textContent = "";
       document.getElementById('login').style.display = 'none';
       document.getElementById('dashboard').style.display = 'block';
       loadAll();
@@ -173,11 +171,31 @@ document.getElementById('btnLogin').addEventListener('click', () => {
 // ========== LOGOUT ==========
 document.getElementById('btnLogout').addEventListener('click', () => {
   currentEmail = null;
+
+  // Ocultar dashboard
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('login').style.display = 'block';
+
+  // Limpiar input de correo
+  document.getElementById('email').value = "";
+
+  // Reset totales
+  document.getElementById('total').textContent = "—";
+  document.getElementById('tipos').textContent = "—";
+  document.getElementById('lotes').textContent = "—";
+  document.getElementById('movs').textContent = "—";
+
+  // Reset movimientos
+  document.getElementById('movData').textContent = "—";
+
+  // Destruir gráficos
+  for (const id in charts) {
+    charts[id].destroy();
+  }
+  charts = {};
 });
 
-// ========== LOAD ALL DATA ==========
+// ========== LOAD ALL ==========
 function loadAll() {
   const endpoints = ['tipos', 'lotes', 'inventario', 'movimientos', 'historico', 'pesos'];
   let results = {};
@@ -207,18 +225,16 @@ function render(data) {
   document.getElementById('lotes').textContent = data.lotes?.length ?? 0;
   document.getElementById('movs').textContent = data.movimientos?.total ?? 0;
 
-  // Movimientos
   document.getElementById('movData').textContent =
     JSON.stringify(data.movimientos?.conteoPorMotivo || [], null, 2);
 
-  // Gráficos
   drawChart('tiposChart', 'pie', data.tipos, 'tipo', 'cantidad');
   drawChart('lotesChart', 'bar', data.lotes, 'lote', 'cantidad');
   drawChart('histChart', 'line', data.historico, 'fecha', 'total', v => new Date(v).toLocaleDateString());
   drawChart('pesosChart', 'bar', avgByLote(data.pesos), 'lote', 'peso');
 }
 
-// ========== AGRUPAMIENTO ==========
+// ========== AGRUPAR POR LOTE ==========
 function avgByLote(pesos) {
   if (!Array.isArray(pesos)) return [];
 
@@ -227,7 +243,6 @@ function avgByLote(pesos) {
   pesos.forEach(r => {
     const l = r.lote || 'SIN LOTE';
     const p = Number(r.peso);
-
     if (isNaN(p)) return;
 
     if (!groups[l]) groups[l] = { sum: 0, n: 0 };
@@ -241,7 +256,7 @@ function avgByLote(pesos) {
   }));
 }
 
-// ========== DIBUJAR CHART ==========
+// ========== GRAFICAR ==========
 function drawChart(id, type, data, labelKey, valueKey, labelFormatter = v => v) {
 
   const canvas = document.getElementById(id);
