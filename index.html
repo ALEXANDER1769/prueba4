@@ -4,26 +4,25 @@
   <meta charset="utf-8" />
   <title>Dashboard Ganadero</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8fafc;
       padding: 20px;
       margin: 0;
     }
-    #loginScreen {
+    #login {
       max-width: 400px;
       margin: 80px auto;
       padding: 24px;
       background: white;
       border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
     .dashboard {
+      display: none;
       max-width: 1200px;
       margin: 0 auto;
-      display: none;
     }
     .charts {
       display: grid;
@@ -33,69 +32,111 @@
     }
     canvas {
       background: white;
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    button {
+    input, button {
       width: 100%;
       padding: 12px;
+      margin: 8px 0;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    button {
       background: #2e7d32;
       color: white;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
       font-weight: bold;
+      cursor: pointer;
     }
-    input {
-      width: 100%;
-      padding: 12px;
-      margin: 10px 0;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-    }
+    button:hover { background: #1b5e20; }
     pre {
-      background: #2d3748;
+      background: #1e293b;
       color: #e2e8f0;
       padding: 12px;
       border-radius: 8px;
       overflow: auto;
-      max-height: 150px;
+      max-height: 160px;
+    }
+    .card {
+      background: white;
+      padding: 16px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      text-align: center;
+      font-weight: bold;
+      color: #2e7d32;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
     }
   </style>
 </head>
 <body>
 
 <!-- LOGIN -->
-<div id="loginScreen">
+<div id="login">
   <h2>🔐 Dashboard Ganadero</h2>
   <p>Ingresa tu correo registrado:</p>
-  <input type="email" id="email" placeholder="ejemplo@correo.com" required />
-  <button onclick="login()">Acceder</button>
-  <p id="msg" style="color: #d32f2f; min-height: 1.2em;"></p>
+  <input type="email" id="email" placeholder="tu@correo.com" value="vicmary.j@gmail.com" />
+  <button id="btnLogin">Acceder</button>
+  <p id="msg" style="color:#d32f2f; min-height:1.2em;"></p>
 </div>
 
 <!-- DASHBOARD -->
 <div class="dashboard" id="dashboard">
   <h1>Dashboard Ganadero</h1>
-  <button onclick="logout()" style="width:auto;">Salir</button>
-  <div class="charts">
-    <div><canvas id="graficoTipos" height="250"></canvas></div>
-    <div><canvas id="graficoLotes" height="250"></canvas></div>
-    <div><canvas id="graficoHistorico" height="250"></canvas></div>
-    <div><canvas id="graficoPesos" height="250"></canvas></div>
+  <button id="btnLogout" style="width:auto;">Salir</button>
+  
+  <div class="summary">
+    <div class="card"><div id="total">—</div>Total</div>
+    <div class="card"><div id="tipos">—</div>Tipos</div>
+    <div class="card"><div id="lotes">—</div>Lotes</div>
+    <div class="card"><div id="movs">—</div>Movs</div>
   </div>
-  <h3>Movimientos (últimos)</h3>
-  <pre id="movimientos">Cargando...</pre>
+
+  <div class="charts">
+    <div><canvas id="tiposChart" height="250"></canvas></div>
+    <div><canvas id="lotesChart" height="250"></canvas></div>
+    <div><canvas id="histChart" height="250"></canvas></div>
+    <div><canvas id="pesosChart" height="250"></canvas></div>
+  </div>
+
+  <h3>Movimientos recientes</h3>
+  <pre id="movData">Cargando...</pre>
 </div>
 
 <script>
 const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYBk6yBlVEMIYlE0g5070PXhdK7__4vwqwZTd09I3qh1OZuWEExX68RY98cZY8QebIeA/exec";
 
-let currentUserEmail = null;
-let chartTipos, chartLotes, chartHistorico, chartPesos;
+let currentEmail = null;
+let charts = {};
 
-async function login() {
+// === JSONP CALL ===
+function callBackend(action, email, callback) {
+  const scriptId = 'jsonp_' + Date.now();
+  window[scriptId] = (data) => {
+    delete window[scriptId];
+    const s = document.getElementById(scriptId);
+    if (s) s.remove();
+    callback(null, data);
+  };
+  const script = document.createElement('script');
+  script.id = scriptId;
+  script.src = `${WEBAPP_URL}?action=${action}&email=${encodeURIComponent(email)}&callback=${scriptId}`;
+  script.onerror = () => {
+    delete window[scriptId];
+    if (script.parentNode) script.parentNode.removeChild(script);
+    callback(new Error('Fallo de red'));
+  };
+  document.head.appendChild(script);
+}
+
+// === LOGIN ===
+document.getElementById('btnLogin').addEventListener('click', () => {
   const email = document.getElementById('email').value.trim();
   const msg = document.getElementById('msg');
   msg.textContent = "";
@@ -106,106 +147,96 @@ async function login() {
   }
 
   msg.textContent = "Verificando...";
-  try {
-    const res = await fetch(`${WEBAPP_URL}?action=auth&email=${encodeURIComponent(email)}`);
-    const data = await res.json();
-    if (data.autorizado) {
-      currentUserEmail = email;
-      document.getElementById('loginScreen').style.display = 'none';
+  callBackend('auth', email, (err, data) => {
+    if (err || !data.autorizado) {
+      msg.textContent = "Acceso denegado";
+    } else {
+      currentEmail = email;
+      document.getElementById('login').style.display = 'none';
       document.getElementById('dashboard').style.display = 'block';
       loadAll();
-    } else {
-      msg.textContent = "Acceso denegado";
     }
-  } catch (err) {
-    msg.textContent = "Error de conexión";
-    console.error(err);
-  }
-}
+  });
+});
 
-async function loadAll() {
-  try {
-    const [tipos, lotes, hist, pesos, movs] = await Promise.all([
-      fetchFromBackend('tipos'),
-      fetchFromBackend('lotes'),
-      fetchFromBackend('historico'),
-      fetchFromBackend('pesos'),
-      fetchFromBackend('movimientos')
-    ]);
+// === LOGOUT ===
+document.getElementById('btnLogout').addEventListener('click', () => {
+  currentEmail = null;
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('login').style.display = 'block';
+});
 
-    drawTipos(tipos);
-    drawLotes(lotes);
-    drawHistorico(hist);
-    drawPesos(pesos);
-    document.getElementById('movimientos').textContent = JSON.stringify(movs.conteoPorMotivo || [], null, 2);
-  } catch (err) {
-    alert("Error al cargar datos: " + err.message);
-  }
-}
+// === LOAD DATA ===
+function loadAll() {
+  const endpoints = ['tipos', 'lotes', 'inventario', 'movimientos', 'historico', 'pesos'];
+  let results = {};
+  let loaded = 0;
 
-async function fetchFromBackend(action) {
-  const url = `${WEBAPP_URL}?action=${action}&email=${encodeURIComponent(currentUserEmail)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("API error");
-  return await res.json();
-}
+  const onResult = (key, err, data) => {
+    if (err) {
+      document.getElementById('msg').textContent = `Error al cargar ${key}`;
+      return;
+    }
+    results[key] = data;
+    loaded++;
+    if (loaded === endpoints.length) render(results);
+  };
 
-function drawTipos(data) {
-  const ctx = document.getElementById('graficoTipos').getContext('2d');
-  if (chartTipos) chartTipos.destroy();
-  chartTipos = new Chart(ctx, {
-    type: 'pie',
-     { labels: data.map(d => d.tipo), datasets: [{  data: data.map(d => d.cantidad) }] },
-    options: { responsive: true }
+  endpoints.forEach(key => {
+    callBackend(key, currentEmail, (err, data) => onResult(key, err, data));
   });
 }
 
-function drawLotes(data) {
-  const ctx = document.getElementById('graficoLotes').getContext('2d');
-  if (chartLotes) chartLotes.destroy();
-  chartLotes = new Chart(ctx, {
-    type: 'bar',
-     { labels: data.map(d => d.lote), datasets: [{  data: data.map(d => d.cantidad) }] },
-    options: { responsive: true, scales: { y: { beginAtZero: true } } }
-  });
+// === RENDER ===
+function render(data) {
+  // Resumen
+  document.getElementById('total').textContent = data.inventario.total || 0;
+  document.getElementById('tipos').textContent = data.tipos.length;
+  document.getElementById('lotes').textContent = data.lotes.length;
+  document.getElementById('movs').textContent = data.movimientos.total || 0;
+
+  // Movimientos
+  document.getElementById('movData').textContent = JSON.stringify(data.movimientos.conteoPorMotivo || [], null, 2);
+
+  // Gráficos
+  drawChart('tiposChart', 'pie', data.tipos, 'tipo', 'cantidad');
+  drawChart('lotesChart', 'bar', data.lotes, 'lote', 'cantidad');
+  drawChart('histChart', 'line', data.historico, 'fecha', 'total', (v) => new Date(v).toLocaleDateString());
+  drawChart('pesosChart', 'bar', avgByLote(data.pesos), 'lote', 'peso');
 }
 
-function drawHistorico(data) {
-  const ctx = document.getElementById('graficoHistorico').getContext('2d');
-  if (chartHistorico) chartHistorico.destroy();
-  const labels = data.map(r => new Date(r.fecha).toLocaleDateString());
-  const values = data.map(r => r.total);
-  chartHistorico = new Chart(ctx, {
-    type: 'line',
-     { labels, datasets: [{  data: values, borderColor: '#2e7d32', tension: 0.3 }] },
-    options: { responsive: true, scales: { y: { beginAtZero: true } } }
-  });
-}
-
-function drawPesos(data) {
+function avgByLote(pesos) {
   const groups = {};
-  data.forEach(r => {
+  pesos.forEach(r => {
     const l = r.lote || 'SIN LOTE';
     if (!groups[l]) groups[l] = { sum: 0, n: 0 };
     groups[l].sum += r.peso;
     groups[l].n++;
   });
-  const labels = Object.keys(groups);
-  const values = labels.map(l => Math.round((groups[l].sum / groups[l].n) * 10) / 10);
-  const ctx = document.getElementById('graficoPesos').getContext('2d');
-  if (chartPesos) chartPesos.destroy();
-  chartPesos = new Chart(ctx, {
-    type: 'bar',
-     { labels, datasets: [{  data: values }] },
-    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  return Object.entries(groups).map(([lote, v]) => ({
+    lote,
+    peso: Math.round((v.sum / v.n) * 10) / 10
+  }));
+}
+
+function drawChart(id, type, data, labelKey, valueKey, labelFormatter = (v) => v) {
+  const canvas = document.getElementById(id);
+  if (charts[id]) charts[id].destroy();
+
+  const ctx = canvas.getContext('2d');
+  const labels = data.map(item => labelFormatter(item[labelKey]));
+  const values = data.map(item => item[valueKey]);
+
+  charts[id] = new Chart(ctx, {
+    type: type,
+     { labels, datasets: [{   values, backgroundColor: getColors(values.length) }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
   });
 }
 
-function logout() {
-  currentUserEmail = null;
-  document.getElementById('dashboard').style.display = 'none';
-  document.getElementById('loginScreen').style.display = 'block';
-  document.getElementById('email').value = '';
+function getColors(n) {
+  const palette = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#FF5722', '#009688', '#607D8B'];
+  return Array.from({ length: n }, (_, i) => palette[i % palette.length]);
 }
 </script>
 </body>
