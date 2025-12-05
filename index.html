@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <title>Dashboard Ganadero</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- CARGA DE CHART.JS -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -75,6 +79,7 @@
     }
   </style>
 </head>
+
 <body>
 
 <!-- LOGIN -->
@@ -115,33 +120,36 @@ const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYBk6yBlVEMIYlE0g50
 let currentEmail = null;
 let charts = {};
 
-// === JSONP CALL ===
+// ========== JSONP CALL ==========
 function callBackend(action, email, callback) {
   const scriptId = 'jsonp_' + Date.now();
+  
   window[scriptId] = (data) => {
     delete window[scriptId];
-    const s = document.getElementById(scriptId);
-    if (s) s.remove();
+    document.getElementById(scriptId)?.remove();
     callback(null, data);
   };
+
   const script = document.createElement('script');
   script.id = scriptId;
   script.src = `${WEBAPP_URL}?action=${action}&email=${encodeURIComponent(email)}&callback=${scriptId}`;
+
   script.onerror = () => {
     delete window[scriptId];
-    if (script.parentNode) script.parentNode.removeChild(script);
-    callback(new Error('Fallo de red'));
+    script.remove();
+    callback(new Error("Fallo de red"));
   };
+
   document.head.appendChild(script);
 }
 
-// === LOGIN ===
+// ========== LOGIN ==========
 document.getElementById('btnLogin').addEventListener('click', () => {
   const email = document.getElementById('email').value.trim();
   const msg = document.getElementById('msg');
   msg.textContent = "";
 
-  if (!email || !email.includes('@')) {
+  if (!email.includes('@')) {
     msg.textContent = "Correo inválido";
     return;
   }
@@ -159,14 +167,14 @@ document.getElementById('btnLogin').addEventListener('click', () => {
   });
 });
 
-// === LOGOUT ===
+// ========== LOGOUT ==========
 document.getElementById('btnLogout').addEventListener('click', () => {
   currentEmail = null;
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('login').style.display = 'block';
 });
 
-// === LOAD DATA ===
+// ========== LOAD ALL DATA ==========
 function loadAll() {
   const endpoints = ['tipos', 'lotes', 'inventario', 'movimientos', 'historico', 'pesos'];
   let results = {};
@@ -174,11 +182,12 @@ function loadAll() {
 
   const onResult = (key, err, data) => {
     if (err) {
-      document.getElementById('msg').textContent = `Error al cargar ${key}`;
+      console.error("Error en", key, err);
       return;
     }
     results[key] = data;
     loaded++;
+
     if (loaded === endpoints.length) render(results);
   };
 
@@ -187,50 +196,81 @@ function loadAll() {
   });
 }
 
-// === RENDER ===
+// ========== RENDER ==========
 function render(data) {
-  // Resumen
-  document.getElementById('total').textContent = data.inventario.total || 0;
-  document.getElementById('tipos').textContent = data.tipos.length;
-  document.getElementById('lotes').textContent = data.lotes.length;
-  document.getElementById('movs').textContent = data.movimientos.total || 0;
+
+  document.getElementById('total').textContent = data.inventario?.total ?? 0;
+  document.getElementById('tipos').textContent = data.tipos?.length ?? 0;
+  document.getElementById('lotes').textContent = data.lotes?.length ?? 0;
+  document.getElementById('movs').textContent = data.movimientos?.total ?? 0;
 
   // Movimientos
-  document.getElementById('movData').textContent = JSON.stringify(data.movimientos.conteoPorMotivo || [], null, 2);
+  document.getElementById('movData').textContent =
+    JSON.stringify(data.movimientos?.conteoPorMotivo || [], null, 2);
 
-  // Gráficos
+  // Gráficos
   drawChart('tiposChart', 'pie', data.tipos, 'tipo', 'cantidad');
   drawChart('lotesChart', 'bar', data.lotes, 'lote', 'cantidad');
-  drawChart('histChart', 'line', data.historico, 'fecha', 'total', (v) => new Date(v).toLocaleDateString());
+  drawChart('histChart', 'line', data.historico, 'fecha', 'total', v => new Date(v).toLocaleDateString());
   drawChart('pesosChart', 'bar', avgByLote(data.pesos), 'lote', 'peso');
 }
 
+// ========== AGRUPAMIENTO ==========
 function avgByLote(pesos) {
+  if (!Array.isArray(pesos)) return [];
+
   const groups = {};
+
   pesos.forEach(r => {
     const l = r.lote || 'SIN LOTE';
+    const p = Number(r.peso);
+
+    if (isNaN(p)) return;
+
     if (!groups[l]) groups[l] = { sum: 0, n: 0 };
-    groups[l].sum += r.peso;
+    groups[l].sum += p;
     groups[l].n++;
   });
+
   return Object.entries(groups).map(([lote, v]) => ({
     lote,
     peso: Math.round((v.sum / v.n) * 10) / 10
   }));
 }
 
-function drawChart(id, type, data, labelKey, valueKey, labelFormatter = (v) => v) {
+// ========== DIBUJAR CHART ==========
+function drawChart(id, type, data, labelKey, valueKey, labelFormatter = v => v) {
+
   const canvas = document.getElementById(id);
   if (charts[id]) charts[id].destroy();
 
-  const ctx = canvas.getContext('2d');
+  if (!Array.isArray(data)) data = [];
+
   const labels = data.map(item => labelFormatter(item[labelKey]));
-  const values = data.map(item => item[valueKey]);
+  const values = data.map(item => Number(item[valueKey]) || 0);
+
+  const ctx = canvas.getContext('2d');
 
   charts[id] = new Chart(ctx, {
     type: type,
-     { labels, datasets: [{   values, backgroundColor: getColors(values.length) }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: getColors(values.length),
+        borderColor: '#333',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: true }
+      },
+      scales: type === 'pie' ? {} : {
+        y: { beginAtZero: true }
+      }
+    }
   });
 }
 
